@@ -229,6 +229,13 @@ export class ReleaseTask extends PublishTask<void> {
 
 let applied = false;
 
+// cargo's publish task queries crates.io, where redact is someone else's crate, even when skipped.
+function cargoVersioning(): TegamiPlugin {
+  const plugin = cargo();
+  delete plugin.publishTasks;
+  return plugin;
+}
+
 export function redact(): TegamiPlugin {
   return {
     name: "redact",
@@ -308,7 +315,7 @@ if (import.meta.main) {
       },
     },
     plugins: [
-      cargo(),
+      cargoVersioning(),
       github({
         release: false,
         versionPr: {
