@@ -39,10 +39,10 @@ jobs:
           if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
             if [ "$GITHUB_REF" = refs/heads/main ] && [ -f .tegami/publish-lock.yaml ]; then
               locked=$(git log -1 --format=%H -- .tegami/publish-lock.yaml)
-              if [ "$locked" = "$GITHUB_SHA" ]; then
+              if git diff --quiet "$locked" "$GITHUB_SHA" -- . ':!scripts' ':!.github' ':!package.json' ':!bun.lock'; then
                 publish=true
               else
-                echo "::error::main has moved past the commit that set the publish lock, rerun the failed jobs of that commit's run instead"
+                echo "::error::main has changed more than the release tooling since the commit that set the publish lock, rerun the failed jobs of that commit's run instead"
                 exit 1
               fi
             fi
