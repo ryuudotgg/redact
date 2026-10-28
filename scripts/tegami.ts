@@ -314,13 +314,13 @@ if (import.meta.main) {
         versionPr: {
           create() {
             return {
-              title: `chore: release ${this.graph.getByName("redact")[0]?.version}`,
+              title: `chore: release ${this.graph.get("cargo:redact")?.version}`,
             };
           },
           commit({ type }) {
             if (type === "version-packages")
               return {
-                title: `chore: release ${this.graph.getByName("redact")[0]?.version}`,
+                title: `chore: release ${this.graph.get("cargo:redact")?.version}`,
               };
           },
         },
