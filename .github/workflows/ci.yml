@@ -1,0 +1,87 @@
+name: CI
+
+on:
+  pull_request:
+    branches: ["**"]
+
+  push:
+    branches: ["main"]
+
+  merge_group:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+env:
+  CARGO_TERM_COLOR: always
+  FORCE_COLOR: 3
+  DO_NOT_TRACK: true
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            name: Ubuntu
+            checks: true
+          - os: macos-latest
+            name: macOS
+            checks: false
+
+    name: Test (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Rust
+        run: rustup show active-toolchain
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+
+      - name: Install Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: .bun-version
+
+      - name: Install Dependencies
+        run: bun install --frozen-lockfile --ignore-scripts
+
+      - name: Cache CLIProxyAPI
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/cpa-downloads
+          key: cpa-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.cpa-version', 'scripts/cpa.sha256') }}
+
+      - name: Install CLIProxyAPI
+        env:
+          CPA_DOWNLOADS: ${{ runner.temp }}/cpa-downloads
+        run: scripts/install-cpa.sh "$RUNNER_TEMP/cpa"
+
+      - name: Code Checks
+        if: matrix.checks
+        run: |
+          cargo fmt --check
+          cargo clippy --all-targets -- -D warnings
+          bun run check
+          bun run typecheck
+
+      - name: Test
+        run: cargo test
+
+      - name: End to End
+        env:
+          CPA_BIN: ${{ runner.temp }}/cpa/cli-proxy-api
+        run: |
+          cargo build
+          bun run e2e

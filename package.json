@@ -1,0 +1,20 @@
+{
+  "name": "redact",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "oxlint && oxfmt --check && stanza --check e2e scripts",
+    "check:fix": "oxlint --fix && oxfmt && stanza --fix e2e scripts",
+    "e2e": "bun test e2e",
+    "tegami": "bun scripts/tegami.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@ryuugg/stanza": "0.3.3",
+    "@types/bun": "latest",
+    "oxfmt": "0.70.0",
+    "oxlint": "^1.85.0",
+    "tegami": "^1.5.0",
+    "typescript": "^7.0.2"
+  }
+}
