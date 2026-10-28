@@ -184,9 +184,15 @@ fn a_full_vault_still_replaces_every_copy_of_a_new_value() {
     ] }),
     );
 
+    let reference = placeholder(&vault, &key);
     assert_eq!(
         redacted["messages"][0]["content"],
-        format!("is {} still valid?", placeholder(&vault, &key))
+        format!("is {reference} still valid?")
+    );
+
+    assert_eq!(
+        redacted["messages"][1]["content"],
+        format!("API_TOKEN={reference}")
     );
 }
 
