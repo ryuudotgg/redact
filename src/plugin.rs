@@ -376,6 +376,18 @@ mod tests {
     }
 
     #[test]
+    fn an_empty_rules_file_keeps_the_rest_of_the_config() {
+        let plugin = Plugin::new(Host::detached(), Arc::new(Vault::new(Key::random())));
+        let config = STANDARD.encode("rules_file: \"\"\nnotice: false\n");
+        plugin.call(
+            "plugin.register",
+            json!({ "config_yaml": config }).to_string().as_bytes(),
+        );
+
+        assert!(!plugin.engine().notice);
+    }
+
+    #[test]
     fn rejects_requests_it_cannot_parse() {
         let plugin = Plugin::new(Host::detached(), Arc::new(Vault::new(Key::random())));
         let reply = plugin.call(

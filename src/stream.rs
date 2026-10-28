@@ -2,11 +2,11 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 
 use crate::fields::{self, Format};
 use crate::placeholder;
-use crate::restore::restore_text;
+use crate::restore::{restore_json_text, restore_text};
 use crate::vault::Vault;
 
 const STATE_TTL: Duration = Duration::from_hours(2);
@@ -638,10 +638,11 @@ fn restore_within(value: &mut Value, vault: &Vault, json_text: bool, payload: bo
             }
 
             let tool = members.keys().any(|key| fields::identifies_a_tool(key));
+            let renamed = restore_keys(members, vault);
             members
                 .iter_mut()
                 .filter(|(key, _)| payload || !fields::is_verified_key(key))
-                .fold(false, |changed, (key, member)| {
+                .fold(renamed, |changed, (key, member)| {
                     let inner = payload || (tool && fields::opens_payload(key));
                     restore_within(member, vault, fields::holds_json_text(key), inner) | changed
                 })
@@ -651,15 +652,47 @@ fn restore_within(value: &mut Value, vault: &Vault, json_text: bool, payload: bo
             restore_within(item, vault, false, payload) | changed
         }),
 
-        Value::String(text) => match restore_text(text, vault, json_text) {
-            Some(restored) => {
-                *text = restored;
-                true
-            }
+        Value::String(text) => {
+            let restored = if json_text {
+                restore_json_text(text, vault)
+            } else {
+                restore_text(text, vault, false)
+            };
 
-            None => false,
-        },
+            match restored {
+                Some(restored) => {
+                    *text = restored;
+                    true
+                }
+
+                None => false,
+            }
+        }
 
         _ => false,
     }
+}
+
+fn restore_keys(members: &mut Map<String, Value>, vault: &Vault) -> bool {
+    if !members
+        .keys()
+        .any(|key| placeholder::contains(key.as_bytes()))
+    {
+        return false;
+    }
+
+    let mut changed = false;
+    *members = std::mem::take(members)
+        .into_iter()
+        .map(|(key, member)| match restore_text(&key, vault, false) {
+            Some(restored) => {
+                changed = true;
+                (restored, member)
+            }
+
+            None => (key, member),
+        })
+        .collect();
+
+    changed
 }

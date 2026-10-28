@@ -21,7 +21,14 @@ impl Config {
         if yaml.iter().all(u8::is_ascii_whitespace) {
             return Ok(Self::default());
         }
-        serde_saphyr::from_slice(yaml).map_err(|error| error.to_string())
+
+        let mut config: Self = serde_saphyr::from_slice(yaml).map_err(|error| error.to_string())?;
+
+        config.rules_file = config
+            .rules_file
+            .filter(|path| !path.as_os_str().is_empty());
+
+        Ok(config)
     }
 
     pub fn notice(&self) -> bool {

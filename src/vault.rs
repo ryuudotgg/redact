@@ -39,7 +39,7 @@ impl Vault {
         Self::with_capacity(key, MAX_VALUES)
     }
 
-    fn with_capacity(key: Key, capacity: usize) -> Self {
+    pub fn with_capacity(key: Key, capacity: usize) -> Self {
         Self {
             key,
             capacity,
@@ -99,6 +99,14 @@ impl Vault {
         Some(Arc::clone(value))
     }
 
+    pub fn generation(&self) -> u64 {
+        self.state
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .generation
+    }
+
+    #[cfg(test)]
     pub fn len(&self) -> usize {
         self.state
             .read()

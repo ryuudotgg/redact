@@ -168,6 +168,29 @@ fn values_found_once_are_replaced_everywhere_in_the_same_body() {
 }
 
 #[test]
+fn a_full_vault_still_replaces_every_copy_of_a_new_value() {
+    let vault = Vault::with_capacity(Key::fixed(42), 16);
+    for index in 0..16 {
+        vault.placeholder(&format!("filler-{index:04}"));
+    }
+
+    let key = Fake(11).take(ALNUM, 40);
+    let redacted = redact_json(
+        &vault,
+        Format::Claude,
+        &json!({ "messages": [
+        { "role": "user", "content": format!("is {key} still valid?") },
+        { "role": "user", "content": format!("API_TOKEN={key}") }
+    ] }),
+    );
+
+    assert_eq!(
+        redacted["messages"][0]["content"],
+        format!("is {} still valid?", placeholder(&vault, &key))
+    );
+}
+
+#[test]
 fn tool_arguments_stay_valid_json() {
     let vault = vault();
     let pw = password(4);
@@ -399,6 +422,41 @@ fn responses_are_restored_outside_signed_blocks() {
         serde_json::from_str(restored["output"][0]["arguments"].as_str().unwrap()).unwrap();
 
     assert_eq!(arguments["cmd"], format!("login --password {pw}"));
+}
+
+#[test]
+fn nested_tool_arguments_are_restored_at_their_own_depth() {
+    let vault = vault();
+    let pw = password(15);
+    let inner = serde_json::to_string(
+        &json!({ "cmd": format!("login --password {}", placeholder(&vault, &pw)) }),
+    )
+    .unwrap();
+
+    let arguments = serde_json::to_string(&json!({ "tool": "shell", "arguments": inner })).unwrap();
+    let item = json!({ "type": "function_call", "call_id": "call_1", "name": "dispatch", "arguments": arguments });
+
+    let body = serde_json::to_vec(&json!({ "output": [item.clone()] })).unwrap();
+    let restored: Value = serde_json::from_slice(&restore(&body, &vault).unwrap()).unwrap();
+
+    let done =
+        sse(&json!({ "type": "response.output_item.done", "output_index": 0, "item": item }));
+
+    let streamed = events(&feed(
+        &Streams::default(),
+        &vault,
+        Format::Responses,
+        &[done],
+    ));
+
+    for arguments in [
+        &restored["output"][0]["arguments"],
+        &streamed[0]["item"]["arguments"],
+    ] {
+        let outer: Value = serde_json::from_str(arguments.as_str().unwrap()).unwrap();
+        let inner: Value = serde_json::from_str(outer["arguments"].as_str().unwrap()).unwrap();
+        assert_eq!(inner["cmd"], format!("login --password {pw}"));
+    }
 }
 
 fn feed(streams: &Streams, vault: &Vault, format: Format, chunks: &[String]) -> String {
@@ -646,6 +704,22 @@ fn gemini_streams_restore_text_parts() {
         .collect();
 
     assert_eq!(joined, format!("token {token} r"));
+}
+
+#[test]
+fn streamed_tool_keys_are_restored() {
+    let vault = vault();
+    let token = github_token(16);
+    let chunk = json!({ "candidates": [{ "index": 0, "content": { "role": "model", "parts": [
+        { "functionCall": { "name": "revoke", "args": { "tokens": { placeholder(&vault, &token): true } } } }
+    ] }, "finishReason": "STOP" }] })
+    .to_string();
+
+    let events = events(&feed(&Streams::default(), &vault, Format::Gemini, &[chunk]));
+    assert_eq!(
+        events[0]["candidates"][0]["content"]["parts"][0]["functionCall"]["args"]["tokens"][&token],
+        true
+    );
 }
 
 #[test]

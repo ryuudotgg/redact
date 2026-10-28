@@ -2,7 +2,7 @@ use std::ops::Range;
 use std::sync::Arc;
 
 use crate::fields::{self, Format};
-use crate::json::{self, Edit, Member, Str, Value, splice};
+use crate::json::{self, Edit, Member, Str, Value, shift, splice};
 use crate::placeholder;
 use crate::scanner::Scanner;
 use crate::vault::{Known, Vault};
@@ -31,7 +31,7 @@ pub fn redact(
     let mut values = 0;
     for _ in 0..MAX_PASSES {
         let source = current.as_deref().unwrap_or(body);
-        let known_before = vault.len();
+        let generation = vault.generation();
 
         let edits = find_edits(source, scanner, vault)?;
         if edits.is_empty() {
@@ -40,7 +40,7 @@ pub fn redact(
 
         values += edits.len();
         current = Some(splice(source, edits));
-        if vault.len() == known_before {
+        if vault.generation() == generation {
             break;
         }
     }
@@ -343,8 +343,4 @@ fn insert_member(members: &[Member], span: &Range<usize>, member: &str) -> Edit 
         range: end..end,
         text: format!("{separator}{member}"),
     }
-}
-
-fn shift(range: Range<usize>, offset: usize) -> Range<usize> {
-    range.start + offset..range.end + offset
 }

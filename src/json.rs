@@ -117,6 +117,10 @@ pub fn splice(source: &[u8], mut edits: Vec<Edit>) -> Vec<u8> {
     out
 }
 
+pub fn shift(range: Range<usize>, offset: usize) -> Range<usize> {
+    range.start + offset..range.end + offset
+}
+
 pub fn parse(source: &[u8]) -> Result<Value, Error> {
     parse_nested(source, 0)
 }
