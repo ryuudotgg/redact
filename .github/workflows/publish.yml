@@ -1,0 +1,154 @@
+name: Publish
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  FORCE_COLOR: 3
+  DO_NOT_TRACK: true
+
+jobs:
+  pending:
+    name: Check Publish Lock
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      publish: ${{ steps.lock.outputs.publish }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Check Publish Lock
+        id: lock
+        env:
+          BEFORE: ${{ github.event.before }}
+        run: |
+          publish=false
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
+            if [ "$GITHUB_REF" = refs/heads/main ] && [ -f .tegami/publish-lock.yaml ]; then
+              locked=$(git log -1 --format=%H -- .tegami/publish-lock.yaml)
+              if [ "$locked" = "$GITHUB_SHA" ]; then
+                publish=true
+              else
+                echo "::error::main has moved past the commit that set the publish lock, rerun the failed jobs of that commit's run instead"
+                exit 1
+              fi
+            fi
+          elif [ "$BEFORE" != 0000000000000000000000000000000000000000 ]; then
+            changed=$(git diff --name-only --diff-filter=AM "$BEFORE" "$GITHUB_SHA" -- .tegami/publish-lock.yaml)
+            if [ -n "$changed" ]; then
+              publish=true
+            fi
+          fi
+
+          echo "publish=$publish" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build (${{ matrix.platform }})
+    needs: pending
+    if: needs.pending.outputs.publish == 'true'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            platform: darwin-arm64
+            library: libredact.dylib
+          - os: ubuntu-22.04
+            platform: linux-x64
+            library: libredact.so
+          - os: ubuntu-22.04-arm
+            platform: linux-arm64
+            library: libredact.so
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Rust
+        run: rustup show active-toolchain
+
+      - name: Install Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: .bun-version
+
+      - name: Install Dependencies
+        run: bun install --frozen-lockfile --ignore-scripts
+
+      - name: Build
+        run: cargo build --release --locked
+
+      - name: Upload Library
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: library-${{ matrix.platform }}
+          path: target/release/${{ matrix.library }}
+          if-no-files-found: error
+
+      - name: Install CLIProxyAPI
+        run: scripts/install-cpa.sh "$RUNNER_TEMP/cpa"
+
+      - name: Smoke Test
+        env:
+          CPA_BIN: ${{ runner.temp }}/cpa/cli-proxy-api
+          REDACT_LIBRARY: target/release/${{ matrix.library }}
+        run: bun run e2e
+
+  publish:
+    name: Publish
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    concurrency:
+      group: release-publish
+      cancel-in-progress: false
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+
+      - name: Install Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: .bun-version
+
+      - name: Install Dependencies
+        run: bun install --frozen-lockfile --ignore-scripts
+
+      - name: Download Libraries
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: library-*
+          path: libraries
+
+      - name: Package Release
+        run: bun scripts/release.ts package libraries dist
+
+      - name: Publish
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node scripts/tegami.ts publish
